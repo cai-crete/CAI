@@ -10,7 +10,7 @@ interface Props {
   onExpand: (id: string) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
-  onMouseDown: (id: string, e: React.MouseEvent) => void;
+  onMouseDown: (id: string, e: React.PointerEvent) => void;
   hasThumbnail: boolean;
   portLeft?: PortShape;  // 자식 측 (도착점)
   portRight?: PortShape; // 부모 측 (출발점)
@@ -61,19 +61,11 @@ const CARD_W_REM = '17.5rem';
 const CARD_H_REM = '12.375rem';
 const PORT_SIZE  = 8; // px — 원/다이아몬드 공통 box 크기
 
-/* ── 포트 인디케이터 렌더링 ──────────────────────────────────── */
-function PortIndicator({
-  shape,
-  side,
-}: {
-  shape: PortShape;
-  side: 'left' | 'right';
-}) {
+/* ── 포트 인디케이터 ──────────────────────────────────────────── */
+function PortIndicator({ shape, side }: { shape: PortShape; side: 'left' | 'right' }) {
   if (shape === 'none') return null;
-
   const isSolid   = shape.endsWith('-solid');
   const isDiamond = shape.startsWith('diamond');
-
   const base: React.CSSProperties = {
     position: 'absolute',
     [side]: -(PORT_SIZE / 2),
@@ -83,19 +75,11 @@ function PortIndicator({
     zIndex: 5,
     pointerEvents: 'none',
     background: isSolid ? 'var(--color-black)' : 'var(--color-white)',
-    border: isSolid ? 'none' : '1.5px solid var(--color-black)',
+    border:     isSolid ? 'none' : '1.5px solid var(--color-black)',
     boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
   };
-
-  if (isDiamond) {
-    return (
-      <div style={{ ...base, transform: 'translateY(-50%) rotate(45deg)' }} />
-    );
-  }
-
-  return (
-    <div style={{ ...base, borderRadius: '50%', transform: 'translateY(-50%)' }} />
-  );
+  if (isDiamond) return <div style={{ ...base, transform: 'translateY(-50%) rotate(45deg)' }} />;
+  return <div style={{ ...base, borderRadius: '50%', transform: 'translateY(-50%)' }} />;
 }
 
 export default function NodeCard({
@@ -107,13 +91,15 @@ export default function NodeCard({
 
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
-  const handleArtboardMouseDown = (e: React.MouseEvent) => {
+  const handleArtboardPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest('button')) return;
     mouseDownPos.current = { x: e.clientX, y: e.clientY };
     onMouseDown(id, e);
   };
 
-  const handleArtboardMouseUp = (e: React.MouseEvent) => {
+  const handleArtboardPointerUp = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
     if (!mouseDownPos.current) return;
     const dx = Math.abs(e.clientX - mouseDownPos.current.x);
     const dy = Math.abs(e.clientY - mouseDownPos.current.y);
@@ -139,7 +125,7 @@ export default function NodeCard({
   };
 
   return (
-    /* 외부 wrapper — overflow: visible 으로 액션 바·포트가 카드 바깥에 노출됨 */
+    /* 외부 wrapper — overflow: visible 으로 액션 바가 카드 바깥에 노출됨 */
     <div style={{ width: CARD_W_REM, userSelect: 'none', position: 'relative' }}>
 
       {/* ── 액션 바 — 아트보드 외부 상단 우측 (선택 시 노출) ────── */}
@@ -147,7 +133,7 @@ export default function NodeCard({
         <div
           style={{
             position: 'absolute',
-            bottom: 'calc(100% + 0.5rem)',
+            bottom: 'calc(100% + 0.5rem)',   /* 아트보드 위 8px */
             right: 0,
             display: 'flex',
             gap: '0.25rem',
@@ -155,32 +141,53 @@ export default function NodeCard({
             pointerEvents: 'all',
           }}
         >
+          {/* 복제 */}
           <button
             title="복제"
             style={actionBtnBase}
             onClick={e => { e.stopPropagation(); onDuplicate(id); }}
-            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-gray-100)'; e.currentTarget.style.color = 'var(--color-black)'; }}
-            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-white)'; e.currentTarget.style.color = 'var(--color-gray-500)'; }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = 'var(--color-gray-100)';
+              e.currentTarget.style.color = 'var(--color-black)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = 'var(--color-white)';
+              e.currentTarget.style.color = 'var(--color-gray-500)';
+            }}
           >
             <span style={{ width: 16, height: 16, display: 'flex' }}><IconDuplicate /></span>
           </button>
 
+          {/* 다운로드 */}
           <button
             title="다운로드"
             style={actionBtnBase}
             onClick={e => e.stopPropagation()}
-            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-gray-100)'; e.currentTarget.style.color = 'var(--color-black)'; }}
-            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-white)'; e.currentTarget.style.color = 'var(--color-gray-500)'; }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = 'var(--color-gray-100)';
+              e.currentTarget.style.color = 'var(--color-black)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = 'var(--color-white)';
+              e.currentTarget.style.color = 'var(--color-gray-500)';
+            }}
           >
             <span style={{ width: 16, height: 16, display: 'flex' }}><IconDownload /></span>
           </button>
 
+          {/* 삭제 */}
           <button
             title="삭제"
             style={actionBtnBase}
             onClick={e => { e.stopPropagation(); onDelete(id); }}
-            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fff0f0'; e.currentTarget.style.color = '#cc0000'; }}
-            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-white)'; e.currentTarget.style.color = 'var(--color-gray-500)'; }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = '#fff0f0';
+              e.currentTarget.style.color = '#cc0000';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = 'var(--color-white)';
+              e.currentTarget.style.color = 'var(--color-gray-500)';
+            }}
           >
             <span style={{ width: 16, height: 16, display: 'flex' }}><IconDelete /></span>
           </button>
@@ -189,8 +196,8 @@ export default function NodeCard({
 
       {/* ── 아트보드 ─────────────────────────────────────────────── */}
       <div
-        onMouseDown={handleArtboardMouseDown}
-        onMouseUp={handleArtboardMouseUp}
+        onPointerDown={handleArtboardPointerDown}
+        onPointerUp={handleArtboardPointerUp}
         style={{
           width: CARD_W_REM,
           height: CARD_H_REM,
@@ -205,15 +212,17 @@ export default function NodeCard({
           transition: 'box-shadow 150ms ease',
         }}
       >
-        {/* ── 확대 버튼 — 내부 우측 상단, 원형 ───────────────────── */}
+        {/* ── 확대 버튼 — 내부 우측 상단, 원형 명시 ───────────────── */}
         <button
           title="전체 화면으로 열기"
           onClick={e => { e.stopPropagation(); onExpand(id); }}
           style={{
             position: 'absolute',
-            top: 8, right: 8,
+            top: 8,
+            right: 8,
             zIndex: 10,
-            width: 32, height: 32,
+            width: 32,
+            height: 32,
             borderRadius: '50%',
             border: '1.5px solid var(--color-gray-200)',
             background: 'var(--color-white)',
@@ -239,35 +248,69 @@ export default function NodeCard({
           <span style={{ width: 14, height: 14, display: 'flex' }}><IconExpand /></span>
         </button>
 
-        {/* ── 아트보드 내용 ─────────────────────────────────────── */}
+        {/* ── 아트보드 내용 — 썸네일 유무 분기 ─────────────────────── */}
         {hasThumbnail ? (
-          <div style={{
-            position: 'absolute', inset: 0,
-            background: 'linear-gradient(135deg, var(--color-gray-100), var(--color-gray-200))',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            pointerEvents: 'none',
-          }}>
-            <span className="text-title" style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', letterSpacing: '0.08em' }}>
+          /* 썸네일 있음 — 임시 그라디언트 배경 */
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'linear-gradient(135deg, var(--color-gray-100), var(--color-gray-200))',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+            }}
+          >
+            <span
+              className="text-title"
+              style={{
+                fontSize: '0.75rem',
+                color: 'var(--color-gray-400)',
+                letterSpacing: '0.08em',
+              }}
+            >
               {def.displayLabel}
             </span>
           </div>
         ) : (
-          <div style={{
-            position: 'absolute', inset: 0,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            gap: 6, pointerEvents: 'none',
-          }}>
-            <span className="text-title" style={{ fontSize: '0.75rem', color: 'var(--color-gray-300)', letterSpacing: '0.08em' }}>
+          /* 썸네일 없음 — 플레이스홀더 */
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              pointerEvents: 'none',
+            }}
+          >
+            <span
+              className="text-title"
+              style={{
+                fontSize: '0.75rem',
+                color: 'var(--color-gray-300)',
+                letterSpacing: '0.08em',
+              }}
+            >
               {def.displayLabel}
             </span>
-            <span style={{ display: 'block', width: 28, height: 1, background: 'var(--color-gray-200)' }} />
+            <span
+              style={{
+                display: 'block',
+                width: 28,
+                height: 1,
+                background: 'var(--color-gray-200)',
+              }}
+            />
             <span className="text-caption" style={{ color: 'var(--color-gray-300)' }}>
               썸네일 없음
             </span>
           </div>
         )}
       </div>
-
       {/* ── 포트 인디케이터 ──────────────────────────────────────── */}
       <PortIndicator shape={portLeft}  side="left"  />
       <PortIndicator shape={portRight} side="right" />

@@ -1,55 +1,60 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
-import { CanvasNode, CanvasEdge, NodeType, NODE_DEFINITIONS, NODE_ORDER, CARD_W_PX } from '@/types/canvas';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { CanvasNode, CanvasEdge, NodeType, NODE_DEFINITIONS } from '@/types/canvas';
 import InfiniteCanvas from '@/components/InfiniteCanvas';
 import LeftToolbar    from '@/components/LeftToolbar';
 import RightSidebar   from '@/components/RightSidebar';
 import ExpandedView   from '@/components/ExpandedView';
 
-/* ── 데모 레이아웃
-   NODE_ORDER 인덱스: planners=0, plan=1, image=2, elevation=3,
-                      viewpoint=4, diagram=5, print=6, sketch=7
-   id = String(index + 1)
+/* ── UUID 생성 (비보안 컨텍스트 폴백: HTTP 로컬 IP 접속 대응) ───── */
+function generateId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
 
-   Group A (상단): planners(1) → plan(2) + image(3)  ← 1부모 여러자식, circle 포트
-   Group B (하단): sketch(8) + diagram(6) → elevation(4)  ← 다중부모, diamond 포트
-   나머지: viewpoint(5), print(7) — 연결 없음
-   ─────────────────────────────────────────────────────────────── */
-const CX = CARD_W_PX + 200; // 컬럼 간격: 카드 폭(280) + 200px gap = 480px
+/* ── localStorage 키 ────────────────────────────────────────────── */
+const LS_ITEMS = 'cai-canvas-items';
+const LS_VIEW  = 'cai-canvas-view';
 
-const DEMO_POSITIONS: Record<string, { x: number; y: number }> = {
-  planners:  { x: 0,      y: 0   },  // Group A 부모
-  plan:      { x: CX,     y: 0   },  // Group A 자식 1
-  image:     { x: CX,     y: 214 },  // Group A 자식 2
-  sketch:    { x: 0,      y: 460 },  // Group B 부모 1
-  diagram:   { x: 0,      y: 674 },  // Group B 부모 2
-  elevation: { x: CX,     y: 567 },  // Group B 자식 (다중부모)
-  viewpoint: { x: CX * 2, y: 0   },  // 독립
-  print:     { x: CX * 2, y: 214 },  // 독립
-};
+function lsSaveItems(nodes: CanvasNode[]) {
+  const stripped = nodes.map(n => ({
+    ...n,
+    src: (n as { src?: string }).src?.startsWith('data:') ? '' : (n as { src?: string }).src,
+  }));
+  try { localStorage.setItem(LS_ITEMS, JSON.stringify(stripped)); } catch { /* quota */ }
+}
 
-const INITIAL_NODES: CanvasNode[] = NODE_ORDER.map((type, i) => ({
-  id: String(i + 1),
-  type,
-  title: `${NODE_DEFINITIONS[type].caption} #1`,
-  position: DEMO_POSITIONS[type],
-  instanceNumber: 1,
-  hasThumbnail: ['planners', 'plan', 'image'].includes(type),
-}));
+function lsLoadItems(): CanvasNode[] {
+  try { return JSON.parse(localStorage.getItem(LS_ITEMS) || '[]'); }
+  catch { return []; }
+}
 
-/* ── 데모 엣지 4개
-   Group A: planners→plan, planners→image  (portRight=circle-solid)
-   Group B: sketch→elevation, diagram→elevation  (portRight=diamond-solid)
-   ─────────────────────────────────────────────────────────────── */
-const INITIAL_EDGES: CanvasEdge[] = [
-  { id: 'demo-edge-1', sourceId: '1', targetId: '2' }, // planners → plan
-  { id: 'demo-edge-2', sourceId: '1', targetId: '3' }, // planners → image
-  { id: 'demo-edge-3', sourceId: '8', targetId: '4' }, // sketch → elevation
-  { id: 'demo-edge-4', sourceId: '6', targetId: '4' }, // diagram → elevation
-];
+function lsSaveView(scale: number, offset: { x: number; y: number }) {
+  try { localStorage.setItem(LS_VIEW, JSON.stringify({ scale, offset })); } catch { /* quota */ }
+}
 
-/* 클릭 시 패널 없이 즉시 expand로 진입하는 노드 타입 */
+function lsLoadView(): { scale: number; offset: { x: number; y: number } } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LS_VIEW) || '{}');
+    return {
+      scale:  raw.scale  ?? 1,
+      offset: raw.offset ?? { x: 80, y: 80 },
+    };
+  } catch { return { scale: 1, offset: { x: 80, y: 80 } }; }
+}
+
+const CARD_W    = 280;
+const CARD_H    = 198;
+const HEADER_H  = 56;   /* var(--header-h) = 3.5rem */
+const MIN_SCALE = 0.1;
+const MAX_SCALE = 4;
+
 const DIRECT_EXPAND_NODES: NodeType[] = ['planners', 'image'];
 
 type ActiveTool = 'cursor' | 'handle';
@@ -63,17 +68,26 @@ export default function CanvasPage() {
   const [activeTool, setActiveTool] = useState<ActiveTool>('cursor');
 
   /* ── nodes + history ─────────────────────────────────────────────── */
-  const [nodes,        setNodes]        = useState<CanvasNode[]>(INITIAL_NODES);
-  const [history,      setHistory]      = useState<CanvasNode[][]>([INITIAL_NODES]);
+  const [nodes,        setNodes]        = useState<CanvasNode[]>([]);
+  const [history,      setHistory]      = useState<CanvasNode[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
-  /* ── edges ───────────────────────────────────────────────────────── */
-  const [edges,      setEdges]      = useState<CanvasEdge[]>(INITIAL_EDGES);
+  /* ── edges + 신규 엣지 애니메이션 ───────────────────────────────── */
+  const [edges,      setEdges]      = useState<CanvasEdge[]>([]);
   const [newEdgeIds, setNewEdgeIds] = useState<Set<string>>(new Set());
 
+  /* ── localStorage 복원 완료 플래그 (persist effect 선실행 방지) ─── */
+  const isRestoredRef = useRef(false);
+
+  /* ── 줌 배율 버튼 사이클 상태 (0: idle, 1: fit-all, 2: focus-latest) */
+  const zoomCycleStateRef = useRef(0);
+  const savedViewRef      = useRef<{ scale: number; offset: { x: number; y: number } } | null>(null);
+
   /* ── 선택 / 확장 상태 ────────────────────────────────────────────── */
-  const [selectedNodeId,       setSelectedNodeId]       = useState<string | null>(null);
+  const [selectedNodeIds,      setSelectedNodeIds]      = useState<string[]>([]);
   const [expandedNodeId,       setExpandedNodeId]       = useState<string | null>(null);
+  /* 단일 선택 시에만 유효한 파생값 — 사이드바·expand 진입에 사용 */
+  const selectedNodeId = selectedNodeIds.length === 1 ? selectedNodeIds[0] : null;
 
   /* ── 통합 사이드바 상태 ──────────────────────────────────────────── */
   const [activeSidebarNodeType, setActiveSidebarNodeType] = useState<NodeType | null>(null);
@@ -107,7 +121,7 @@ export default function CanvasPage() {
         e.preventDefault();
       }
       if (e.key === 'Escape') {
-        setSelectedNodeId(null);
+        setSelectedNodeIds([]);
         if (expandedNodeId) handleReturnFromExpand();
       }
     };
@@ -115,15 +129,43 @@ export default function CanvasPage() {
     return () => window.removeEventListener('keydown', h);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [undo, redo, expandedNodeId]);
+
+  /* ── persist: nodes → localStorage (복원 완료 후에만) ──────────── */
+  useEffect(() => {
+    if (!isRestoredRef.current) return;
+    lsSaveItems(nodes);
+  }, [nodes]);
+
+  /* ── persist: viewport → localStorage (복원 완료 후에만) ───────── */
+  useEffect(() => {
+    if (!isRestoredRef.current) return;
+    lsSaveView(scale, offset);
+  }, [scale, offset]);
+
+  /* ── mount: localStorage 복원 → isRestoredRef = true ───────────── */
+  useEffect(() => {
+    const view = lsLoadView();
+    setScale(view.scale);
+    setOffset(view.offset);
+
+    const saved = lsLoadItems();
+    if (saved.length > 0) {
+      setNodes(saved);
+      setHistory([saved]);
+    }
+
+    isRestoredRef.current = true;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   /* ── node 생성 후 즉시 expand 진입 ──────────────────────────────── */
   const createAndExpandNode = useCallback((type: NodeType) => {
     const currentNodes = nodes;
     const existing = currentNodes.filter(n => n.type === type);
     const num = existing.length + 1;
-    const cwx = (window.innerWidth  / 2 - offset.x) / scale - CARD_W_PX / 2;
+    const cwx = (window.innerWidth  / 2 - offset.x) / scale - CARD_W / 2;
     const cwy = (window.innerHeight / 2 - offset.y) / scale - 120;
     const newNode: CanvasNode = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       type,
       title: `${NODE_DEFINITIONS[type].caption} #${num}`,
       position: { x: cwx, y: cwy },
@@ -140,10 +182,10 @@ export default function CanvasPage() {
     const currentNodes = nodes;
     const existing = currentNodes.filter(n => n.type === 'sketch');
     const num = existing.length + 1;
-    const cwx = (window.innerWidth  / 2 - offset.x) / scale - CARD_W_PX / 2;
+    const cwx = (window.innerWidth  / 2 - offset.x) / scale - CARD_W / 2;
     const cwy = (window.innerHeight / 2 - offset.y) / scale - 120;
     const newNode: CanvasNode = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       type: 'sketch',
       title: `SKETCH #${num}`,
       position: { x: cwx, y: cwy },
@@ -151,7 +193,7 @@ export default function CanvasPage() {
       hasThumbnail: false,
     };
     pushHistory([...currentNodes, newNode]);
-    setSelectedNodeId(newNode.id);
+    setSelectedNodeIds([newNode.id]);
     setActiveSidebarNodeType(null);
   }, [nodes, offset, scale, pushHistory]);
 
@@ -175,11 +217,13 @@ export default function CanvasPage() {
   }, []);
 
   const commitNodePosition = useCallback((id: string) => {
-    const next = nodes.map(n => n.id === id ? { ...n, autoPlaced: false } : n);
-    setNodes(next);
-    setHistory(prev => [...prev.slice(0, historyIndex + 1), next]);
-    setHistoryIndex(i => i + 1);
-  }, [nodes, historyIndex]);
+    setNodes(prev => {
+      const next = prev.map(n => n.id === id ? { ...n, autoPlaced: false } : n);
+      setHistory(h => [...h.slice(0, historyIndex + 1), next]);
+      setHistoryIndex(i => i + 1);
+      return next;
+    });
+  }, [historyIndex]);
 
   /* ── 사이드바 노드 탭 선택 ────────────────────────────────────────── */
   const handleNodeTabSelect = useCallback((type: NodeType) => {
@@ -212,13 +256,18 @@ export default function CanvasPage() {
   const handleNodeCardSelect = useCallback((id: string) => {
     const node = nodes.find(n => n.id === id);
     if (!node) return;
-    setSelectedNodeId(id);
+    setSelectedNodeIds([id]);
     setActiveSidebarNodeType(node.type);
   }, [nodes]);
 
   /* ── 빈 캔버스 클릭 → 선택 해제 + 패널 닫기 ────────────────────── */
   const handleNodeDeselect = useCallback(() => {
-    setSelectedNodeId(null);
+    setSelectedNodeIds([]);
+    setActiveSidebarNodeType(null);
+  }, []);
+
+  const handleNodesSelect = useCallback((ids: string[]) => {
+    setSelectedNodeIds(ids);
     setActiveSidebarNodeType(null);
   }, []);
 
@@ -229,7 +278,7 @@ export default function CanvasPage() {
     const num = nodes.filter(n => n.type === src.type).length + 1;
     pushHistory([...nodes, {
       ...src,
-      id: crypto.randomUUID(),
+      id: generateId(),
       title: `${NODE_DEFINITIONS[src.type].caption} #${num}`,
       instanceNumber: num,
       position: { x: src.position.x + 24, y: src.position.y + 24 },
@@ -238,9 +287,9 @@ export default function CanvasPage() {
   }, [nodes, pushHistory]);
 
   const deleteNode = useCallback((id: string) => {
-    setSelectedNodeId(prev => {
-      if (prev === id) setActiveSidebarNodeType(null);
-      return prev === id ? null : prev;
+    setSelectedNodeIds(prev => {
+      if (prev.includes(id)) setActiveSidebarNodeType(null);
+      return prev.filter(sid => sid !== id);
     });
     setEdges(prev => prev.filter(e => e.sourceId !== id && e.targetId !== id));
     pushHistory(nodes.filter(n => n.id !== id));
@@ -250,9 +299,67 @@ export default function CanvasPage() {
   const expandedNode = expandedNodeId ? nodes.find(n => n.id === expandedNodeId) ?? null : null;
 
   /* ── zoom ───────────────────────────────────────────────────────── */
-  const zoomIn    = () => setScale(s => Math.min(4,   parseFloat((s * 1.25).toFixed(2))));
-  const zoomOut   = () => setScale(s => Math.max(0.1, parseFloat((s * 0.8).toFixed(2))));
-  const zoomReset = () => { setScale(1); setOffset({ x: 80, y: 80 }); };
+  const zoomIn  = () => setScale(s => Math.min(MAX_SCALE, parseFloat((s * 1.25).toFixed(2))));
+  const zoomOut = () => setScale(s => Math.max(MIN_SCALE, parseFloat((s * 0.8).toFixed(2))));
+
+  const handleZoomCycle = useCallback(() => {
+    const state = zoomCycleStateRef.current;
+    const vpW   = window.innerWidth;
+    const vpH   = window.innerHeight - HEADER_H;
+
+    /* ── 1번째 클릭: 전체 노드 fit ──────────────────────────────── */
+    if (state === 0) {
+      savedViewRef.current = { scale, offset };   /* 복원용 현재 뷰 저장 */
+
+      if (nodes.length === 0) {
+        setScale(1); setOffset({ x: 80, y: 80 });
+        zoomCycleStateRef.current = 1;
+        return;
+      }
+      const pad  = 80;
+      const minX = Math.min(...nodes.map(n => n.position.x));
+      const minY = Math.min(...nodes.map(n => n.position.y));
+      const maxX = Math.max(...nodes.map(n => n.position.x + CARD_W));
+      const maxY = Math.max(...nodes.map(n => n.position.y + CARD_H));
+      const cW   = maxX - minX;
+      const cH   = maxY - minY;
+      const ns   = Math.min(
+        (vpW - pad * 2) / cW,
+        (vpH - pad * 2) / cH,
+        MAX_SCALE,
+      );
+      const clampedScale = Math.max(MIN_SCALE, ns);
+      setScale(clampedScale);
+      setOffset({
+        x: vpW / 2 - ((minX + maxX) / 2) * clampedScale,
+        y: vpH / 2 - ((minY + maxY) / 2) * clampedScale,
+      });
+      zoomCycleStateRef.current = 1;
+      return;
+    }
+
+    /* ── 2번째 클릭: 가장 최근 생성 아이템 포커스 ───────────────── */
+    if (state === 1) {
+      const last = nodes[nodes.length - 1];
+      if (last) {
+        const ns = 1;
+        setScale(ns);
+        setOffset({
+          x: vpW / 2 - (last.position.x + CARD_W / 2) * ns,
+          y: vpH / 2 - (last.position.y + CARD_H / 2) * ns,
+        });
+      }
+      zoomCycleStateRef.current = 2;
+      return;
+    }
+
+    /* ── 3번째 클릭: 저장된 뷰 복원 ────────────────────────────── */
+    const saved = savedViewRef.current;
+    if (saved) { setScale(saved.scale); setOffset(saved.offset); }
+    else        { setScale(1); setOffset({ x: 80, y: 80 }); }
+    savedViewRef.current      = null;
+    zoomCycleStateRef.current = 0;
+  }, [scale, offset, nodes]);
 
   /* ── 헤더 ───────────────────────────────────────────────────────── */
   const Header = () => (
@@ -276,7 +383,7 @@ export default function CanvasPage() {
 
   /* ── render ─────────────────────────────────────────────────────── */
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', userSelect: 'none' }}>
       <Header />
 
       {/* ── 확장 뷰 ─────────────────────────────────────────────────── */}
@@ -293,7 +400,7 @@ export default function CanvasPage() {
           onRedo={redo}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
-          onZoomReset={zoomReset}
+          onZoomReset={handleZoomCycle}
           onAddSketch={handleCreateEmptySketch}
         />
       ) : (
@@ -306,13 +413,14 @@ export default function CanvasPage() {
             scale={scale}
             offset={offset}
             activeTool={activeTool}
-            selectedNodeId={selectedNodeId}
+            selectedNodeIds={selectedNodeIds}
             onScaleChange={setScale}
             onOffsetChange={setOffset}
             onNodePositionChange={updateNodePosition}
             onNodePositionCommit={commitNodePosition}
             onNodeSelect={handleNodeCardSelect}
             onNodeDeselect={handleNodeDeselect}
+            onNodesSelect={handleNodesSelect}
             onNodeExpand={setExpandedNodeId}
             onNodeDuplicate={duplicateNode}
             onNodeDelete={deleteNode}
@@ -328,7 +436,7 @@ export default function CanvasPage() {
             onRedo={redo}
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
-            onZoomReset={zoomReset}
+            onZoomReset={handleZoomCycle}
             onAddSketch={handleCreateEmptySketch}
           />
 

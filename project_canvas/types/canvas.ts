@@ -2,7 +2,7 @@
 export const CARD_W_PX  = 280; // 17.5rem
 export const CARD_H_PX  = 198; // 12.375rem
 export const COL_GAP_PX = 40;  // 컬럼 간 수평 간격
-export const ROW_GAP_PX = 16;  // 형제 노드 간 수직 간격 (1rem)
+export const ROW_GAP_PX = 16;  // 형제 노드 간 수직 간격
 
 /* 포트 인디케이터 형태 */
 export type PortShape =
@@ -11,6 +11,12 @@ export type PortShape =
   | 'circle-outline'  // 자식 포트, 단일 연결
   | 'diamond-solid'   // 부모 포트, 다중 연결
   | 'diamond-outline' // 자식 포트, 다중 연결
+
+export interface CanvasEdge {
+  id: string;
+  sourceId: string; // 부모 노드
+  targetId: string; // 자식 노드
+}
 
 export type NodeType =
   | 'planners'
@@ -33,13 +39,7 @@ export interface CanvasNode {
   hasThumbnail: boolean;
   thumbnailData?: string;
   parentId?: string;    // 파생 출처 노드 id
-  autoPlaced?: boolean; // Auto Layout으로 배치된 노드 (수동 드래그 시 false로 전환)
-}
-
-export interface CanvasEdge {
-  id: string;
-  sourceId: string; // 부모 노드
-  targetId: string; // 자식 노드
+  autoPlaced?: boolean; // Auto Layout 배치 노드 (수동 드래그 시 false로 전환)
 }
 
 export interface CanvasViewport {
