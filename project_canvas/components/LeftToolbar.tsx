@@ -13,7 +13,7 @@ interface Props {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomReset: () => void;
-  onAddSketch: () => void;
+  onAddArtboard: () => void;
 }
 
 const IC = { stroke: 'currentColor', fill: 'none', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
@@ -62,7 +62,7 @@ export default function LeftToolbar({
   activeTool, scale, canUndo, canRedo,
   onToolChange, onUndo, onRedo,
   onZoomIn, onZoomOut, onZoomReset,
-  onAddSketch,
+  onAddArtboard,
 }: Props) {
   const pct = Math.round(scale * 100);
 
@@ -182,8 +182,8 @@ export default function LeftToolbar({
         transform: 'translateX(-50%)',
       }}>
         <button
-          onClick={onAddSketch}
-          title="새 스케치 아트보드 추가"
+          onClick={onAddArtboard}
+          title="새 아트보드 추가"
           style={{
             width: '3.5rem',
             height: '3.5rem',

@@ -1,7 +1,7 @@
 ---
 title: 미들 버튼 팬(Middle Button Panning) 구현
 created: 2026-04-22
-status: active
+status: completed
 ---
 
 ## 목적

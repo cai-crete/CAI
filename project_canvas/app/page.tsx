@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { CanvasNode, CanvasEdge, NodeType, NODE_DEFINITIONS } from '@/types/canvas';
+import {
+  CanvasNode, CanvasEdge, NodeType,
+  ArtboardType, NODE_TO_ARTBOARD_TYPE, NODES_THAT_EXPAND,
+  NODE_DEFINITIONS,
+} from '@/types/canvas';
 import InfiniteCanvas from '@/components/InfiniteCanvas';
 import LeftToolbar    from '@/components/LeftToolbar';
 import RightSidebar   from '@/components/RightSidebar';
@@ -31,7 +35,10 @@ function lsSaveItems(nodes: CanvasNode[]) {
 }
 
 function lsLoadItems(): CanvasNode[] {
-  try { return JSON.parse(localStorage.getItem(LS_ITEMS) || '[]'); }
+  try {
+    const raw: CanvasNode[] = JSON.parse(localStorage.getItem(LS_ITEMS) || '[]');
+    return raw.map(n => ({ ...n, artboardType: n.artboardType ?? 'sketch' }));
+  }
   catch { return []; }
 }
 
@@ -55,6 +62,7 @@ const HEADER_H  = 56;   /* var(--header-h) = 3.5rem */
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 4;
 
+/* 아트보드 미선택 상태에서 탭 클릭 시 바로 expand 진입하는 노드 */
 const DIRECT_EXPAND_NODES: NodeType[] = ['planners', 'image'];
 
 type ActiveTool = 'cursor' | 'handle';
@@ -74,7 +82,7 @@ export default function CanvasPage() {
 
   /* ── edges + 신규 엣지 애니메이션 ───────────────────────────────── */
   const [edges,      setEdges]      = useState<CanvasEdge[]>([]);
-  const [newEdgeIds, setNewEdgeIds] = useState<Set<string>>(new Set());
+  const [newEdgeIds] = useState<Set<string>>(new Set());
 
   /* ── localStorage 복원 완료 플래그 (persist effect 선실행 방지) ─── */
   const isRestoredRef = useRef(false);
@@ -86,11 +94,15 @@ export default function CanvasPage() {
   /* ── 선택 / 확장 상태 ────────────────────────────────────────────── */
   const [selectedNodeIds,      setSelectedNodeIds]      = useState<string[]>([]);
   const [expandedNodeId,       setExpandedNodeId]       = useState<string | null>(null);
-  /* 단일 선택 시에만 유효한 파생값 — 사이드바·expand 진입에 사용 */
   const selectedNodeId = selectedNodeIds.length === 1 ? selectedNodeIds[0] : null;
 
   /* ── 통합 사이드바 상태 ──────────────────────────────────────────── */
   const [activeSidebarNodeType, setActiveSidebarNodeType] = useState<NodeType | null>(null);
+
+  /* ── 선택된 아트보드 유형 (파생값) ──────────────────────────────── */
+  const selectedArtboardType: ArtboardType | null = selectedNodeId
+    ? (nodes.find(n => n.id === selectedNodeId)?.artboardType ?? null)
+    : null;
 
   /* ── history helpers ─────────────────────────────────────────────── */
   const pushHistory = useCallback((next: CanvasNode[]) => {
@@ -157,13 +169,14 @@ export default function CanvasPage() {
     isRestoredRef.current = true;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── node 생성 후 즉시 expand 진입 ──────────────────────────────── */
+  /* ── 노드 생성 후 즉시 expand 진입 ──────────────────────────────── */
   const createAndExpandNode = useCallback((type: NodeType) => {
     const currentNodes = nodes;
     const existing = currentNodes.filter(n => n.type === type);
     const num = existing.length + 1;
     const cwx = (window.innerWidth  / 2 - offset.x) / scale - CARD_W / 2;
     const cwy = (window.innerHeight / 2 - offset.y) / scale - 120;
+    const artboardType: ArtboardType = NODE_TO_ARTBOARD_TYPE[type] ?? 'sketch';
     const newNode: CanvasNode = {
       id: generateId(),
       type,
@@ -171,6 +184,7 @@ export default function CanvasPage() {
       position: { x: cwx, y: cwy },
       instanceNumber: num,
       hasThumbnail: false,
+      artboardType,
     };
     const next = [...currentNodes, newNode];
     pushHistory(next);
@@ -178,19 +192,20 @@ export default function CanvasPage() {
     setActiveSidebarNodeType(null);
   }, [nodes, offset, scale, pushHistory]);
 
-  const handleCreateEmptySketch = useCallback(() => {
+  /* ── '+' 버튼: 빈 아트보드 생성 ─────────────────────────────────── */
+  const handleAddArtboard = useCallback(() => {
     const currentNodes = nodes;
-    const existing = currentNodes.filter(n => n.type === 'sketch');
-    const num = existing.length + 1;
+    const num = currentNodes.length + 1;
     const cwx = (window.innerWidth  / 2 - offset.x) / scale - CARD_W / 2;
     const cwy = (window.innerHeight / 2 - offset.y) / scale - 120;
     const newNode: CanvasNode = {
       id: generateId(),
       type: 'sketch',
-      title: `SKETCH #${num}`,
+      title: `ARTBOARD #${num}`,
       position: { x: cwx, y: cwy },
       instanceNumber: num,
       hasThumbnail: false,
+      artboardType: 'blank',
     };
     pushHistory([...currentNodes, newNode]);
     setSelectedNodeIds([newNode.id]);
@@ -227,19 +242,43 @@ export default function CanvasPage() {
 
   /* ── 사이드바 노드 탭 선택 ────────────────────────────────────────── */
   const handleNodeTabSelect = useCallback((type: NodeType) => {
-    /* 즉시 expand 노드 + 썸네일 없는 신규 진입 */
-    if (DIRECT_EXPAND_NODES.includes(type) && !selectedNodeId) {
+    const selectedNode = selectedNodeId ? nodes.find(n => n.id === selectedNodeId) : null;
+
+    /* ── 아트보드가 선택된 경우: 직접 액션 ──────────────────────── */
+    if (selectedNode) {
+      const targetArtboardType = NODE_TO_ARTBOARD_TYPE[type];
+      if (!targetArtboardType) return;
+
+      /* blank 아트보드: 유형 배정 */
+      if (selectedNode.artboardType === 'blank') {
+        const next = nodes.map(n =>
+          n.id === selectedNode.id
+            ? { ...n, artboardType: targetArtboardType, type }
+            : n
+        );
+        pushHistory(next);
+      }
+
+      /* expand 진입 노드 → 즉시 expand */
+      if (NODES_THAT_EXPAND.includes(type)) {
+        setExpandedNodeId(selectedNode.id);
+      }
+      /* 인-캔버스 노드 (ELEVATION / VIEWPOINT / DIAGRAM): 추후 구현 */
+
+      setActiveSidebarNodeType(null);
+      return;
+    }
+
+    /* ── 아트보드 미선택: 기존 동작 ─────────────────────────────── */
+    if (DIRECT_EXPAND_NODES.includes(type)) {
       createAndExpandNode(type);
       return;
     }
-    /* 토글: 같은 탭 재클릭 시 SELECT TOOLS로 복귀 */
     setActiveSidebarNodeType(prev => prev === type ? null : type);
-    // setSelectedNodeId(null); // 사용자의 요청으로 선택 상태를 유지합니다.
-  }, [selectedNodeId, createAndExpandNode]);
+  }, [selectedNodeId, nodes, pushHistory, createAndExpandNode]);
 
   /* ── "→" 버튼: 사이드바 패널에서 expand 진입 ──────────────────────── */
   const handleNavigateToExpand = useCallback((type: NodeType) => {
-    /* 기존 썸네일이 있는 노드가 선택되어 있으면 그 노드로 expand */
     if (selectedNodeId) {
       const selected = nodes.find(n => n.id === selectedNodeId);
       if (selected && selected.type === type) {
@@ -248,7 +287,6 @@ export default function CanvasPage() {
         return;
       }
     }
-    /* 아니면 새 노드 생성 후 expand */
     createAndExpandNode(type);
   }, [selectedNodeId, nodes, createAndExpandNode]);
 
@@ -257,7 +295,12 @@ export default function CanvasPage() {
     const node = nodes.find(n => n.id === id);
     if (!node) return;
     setSelectedNodeIds([id]);
-    setActiveSidebarNodeType(node.type);
+    /* thumbnail 아트보드: 자동으로 PLANNERS 패널 표시 */
+    if (node.artboardType === 'thumbnail') {
+      setActiveSidebarNodeType('planners');
+    } else {
+      setActiveSidebarNodeType(null);
+    }
   }, [nodes]);
 
   /* ── 빈 캔버스 클릭 → 선택 해제 + 패널 닫기 ────────────────────── */
@@ -307,9 +350,8 @@ export default function CanvasPage() {
     const vpW   = window.innerWidth;
     const vpH   = window.innerHeight - HEADER_H;
 
-    /* ── 1번째 클릭: 전체 노드 fit ──────────────────────────────── */
     if (state === 0) {
-      savedViewRef.current = { scale, offset };   /* 복원용 현재 뷰 저장 */
+      savedViewRef.current = { scale, offset };
 
       if (nodes.length === 0) {
         setScale(1); setOffset({ x: 80, y: 80 });
@@ -338,7 +380,6 @@ export default function CanvasPage() {
       return;
     }
 
-    /* ── 2번째 클릭: 가장 최근 생성 아이템 포커스 ───────────────── */
     if (state === 1) {
       const last = nodes[nodes.length - 1];
       if (last) {
@@ -353,7 +394,6 @@ export default function CanvasPage() {
       return;
     }
 
-    /* ── 3번째 클릭: 저장된 뷰 복원 ────────────────────────────── */
     const saved = savedViewRef.current;
     if (saved) { setScale(saved.scale); setOffset(saved.offset); }
     else        { setScale(1); setOffset({ x: 80, y: 80 }); }
@@ -386,7 +426,6 @@ export default function CanvasPage() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', userSelect: 'none' }}>
       <Header />
 
-      {/* ── 확장 뷰 ─────────────────────────────────────────────────── */}
       {expandedNode ? (
         <ExpandedView
           node={expandedNode}
@@ -401,10 +440,9 @@ export default function CanvasPage() {
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           onZoomReset={handleZoomCycle}
-          onAddSketch={handleCreateEmptySketch}
+          onAddArtboard={handleAddArtboard}
         />
       ) : (
-        /* ── 캔버스 뷰 ────────────────────────────────────────────── */
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           <InfiniteCanvas
             nodes={nodes}
@@ -437,11 +475,12 @@ export default function CanvasPage() {
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
             onZoomReset={handleZoomCycle}
-            onAddSketch={handleCreateEmptySketch}
+            onAddArtboard={handleAddArtboard}
           />
 
           <RightSidebar
             activeSidebarNodeType={activeSidebarNodeType}
+            selectedArtboardType={selectedArtboardType}
             onNodeTabSelect={handleNodeTabSelect}
             onNavigateToExpand={handleNavigateToExpand}
           />

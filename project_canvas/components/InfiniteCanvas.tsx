@@ -416,6 +416,7 @@ export default function InfiniteCanvas({
               onDelete={onNodeDelete}
               onMouseDown={handleNodeMouseDown}
               hasThumbnail={node.hasThumbnail}
+              artboardType={node.artboardType}
               portLeft={getPortLeft(node.id)}
               portRight={getPortRight(node.id)}
             />
