@@ -53,12 +53,23 @@ export async function POST(req: NextRequest) {
     });
     clearTimeout(timer);
 
-    const data = await upstream.json();
+    const text = await upstream.text();
+    let data: unknown;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      /* 비-JSON 응답 (413 Request Entity Too Large 등) */
+      return NextResponse.json(
+        { success: false, error: `ELEVATION backend ${upstream.status}: ${text.slice(0, 200)}` },
+        { status: upstream.status >= 400 ? upstream.status : 500 },
+      );
+    }
     return NextResponse.json(data, { status: upstream.status });
   } catch (err) {
     clearTimeout(timer);
+    const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { success: false, error: err instanceof Error ? err.message : String(err) },
+      { success: false, error: msg },
       { status: 500 },
     );
   }
