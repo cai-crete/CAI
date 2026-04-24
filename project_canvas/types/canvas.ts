@@ -88,6 +88,22 @@ export interface SavedInsightData {
   }>;
 }
 
+/* ── ELEVATION 노드 전용 타입 ──────────────────────────────────── */
+export type ElevationView = 'top' | 'front' | 'rear' | 'left' | 'right';
+
+export interface ElevationNodeData {
+  isLoading: boolean;
+  currentView: ElevationView;
+  images: {
+    top: string;
+    front: string;
+    rear: string;
+    left: string;
+    right: string;
+  };
+  aeplSchema: Record<string, unknown>;
+}
+
 export interface CanvasNode {
   id: string;
   type: NodeType;
@@ -105,6 +121,7 @@ export interface CanvasNode {
   plannerMessages?: PlannerMessage[];
   plannerInsightData?: SavedInsightData; // Insight 패널 데이터 (재진입 시 복원용)
   cadastralPnu?: string;                 // 지적도 노드 전용 — VWorld PNU 코드
+  elevationData?: ElevationNodeData;     // ELEVATION 노드 전용 — 5-view 이미지 + AEPL
 }
 
 export interface CanvasViewport {

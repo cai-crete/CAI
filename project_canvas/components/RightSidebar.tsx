@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { NodeType, NODE_DEFINITIONS, NODE_ORDER, ArtboardType, ARTBOARD_COMPATIBLE_NODES, PlannerMessage } from '@/types/canvas';
+import { NodeType, NODE_DEFINITIONS, NODE_ORDER, ArtboardType, ARTBOARD_COMPATIBLE_NODES, PlannerMessage, ElevationNodeData, ElevationView } from '@/types/canvas';
+import ElevationRightPanel from '@/components/panels/ElevationRightPanel';
 
 interface Props {
   activeSidebarNodeType: NodeType | null;
@@ -9,6 +10,8 @@ interface Props {
   onNodeTabSelect: (type: NodeType) => void;
   onNavigateToExpand: (type: NodeType) => void;
   plannerMessages?: PlannerMessage[];
+  elevationData?: ElevationNodeData;
+  onElevationViewChange?: (view: ElevationView) => void;
 }
 
 const IC = { stroke: 'currentColor', fill: 'none', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
@@ -206,7 +209,7 @@ const ARTBOARD_TOOLS_LABEL: Record<'sketch' | 'image', string> = {
 export default function RightSidebar({
   activeSidebarNodeType, selectedArtboardType,
   onNodeTabSelect, onNavigateToExpand,
-  plannerMessages,
+  plannerMessages, elevationData, onElevationViewChange,
 }: Props) {
   const [accordionOpen, setAccordionOpen] = useState(true);
 
@@ -256,7 +259,7 @@ export default function RightSidebar({
      — sketch 또는 image 아트보드가 선택된 상태
      — 호환 노드 탭만 표시, 클릭 시 직접 액션 (패널 없음)
   ══════════════════════════════════════════════════════════════ */
-  if (selectedArtboardType === 'sketch' || selectedArtboardType === 'image') {
+  if ((selectedArtboardType === 'sketch' || selectedArtboardType === 'image') && activeSidebarNodeType !== 'elevation') {
     const label = ARTBOARD_TOOLS_LABEL[selectedArtboardType];
     const compatibleNodes = ARTBOARD_COMPATIBLE_NODES[selectedArtboardType];
     return (
@@ -331,11 +334,18 @@ export default function RightSidebar({
           background: 'var(--color-white)', borderRadius: 'var(--radius-box)',
           boxShadow: 'var(--shadow-float)', flex: 1, minHeight: 0, pointerEvents: 'all',
         }}>
-          <NodePanel
-            type={activeSidebarNodeType!}
-            onGenerate={() => onNavigateToExpand(activeSidebarNodeType!)}
-            plannerMessages={plannerMessages}
-          />
+          {activeSidebarNodeType === 'elevation' && elevationData ? (
+            <ElevationRightPanel
+              elevationData={elevationData}
+              onViewChange={view => onElevationViewChange?.(view)}
+            />
+          ) : (
+            <NodePanel
+              type={activeSidebarNodeType!}
+              onGenerate={() => onNavigateToExpand(activeSidebarNodeType!)}
+              plannerMessages={plannerMessages}
+            />
+          )}
         </div>
       </div>
     );

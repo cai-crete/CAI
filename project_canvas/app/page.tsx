@@ -5,6 +5,7 @@ import {
   CanvasNode, CanvasEdge, NodeType,
   ArtboardType, NODE_TO_ARTBOARD_TYPE, NODES_THAT_EXPAND,
   NODE_DEFINITIONS, PlannerMessage,
+  ElevationNodeData, ElevationView,
 } from '@/types/canvas';
 import InfiniteCanvas from '@/components/InfiniteCanvas';
 import LeftToolbar    from '@/components/LeftToolbar';
@@ -25,6 +26,7 @@ function generateId(): string {
 /* ── localStorage 키 ────────────────────────────────────────────── */
 const LS_ITEMS = 'cai-canvas-items';
 const LS_VIEW  = 'cai-canvas-view';
+const LS_EDGES = 'cai-canvas-edges';
 
 function lsSaveItems(nodes: CanvasNode[]) {
   const stripped = nodes.map(n => ({
@@ -39,6 +41,15 @@ function lsLoadItems(): CanvasNode[] {
     const raw: CanvasNode[] = JSON.parse(localStorage.getItem(LS_ITEMS) || '[]');
     return raw.map(n => ({ ...n, artboardType: n.artboardType ?? 'sketch' }));
   }
+  catch { return []; }
+}
+
+function lsSaveEdges(edges: CanvasEdge[]) {
+  try { localStorage.setItem(LS_EDGES, JSON.stringify(edges)); } catch { /* quota */ }
+}
+
+function lsLoadEdges(): CanvasEdge[] {
+  try { return JSON.parse(localStorage.getItem(LS_EDGES) || '[]'); }
   catch { return []; }
 }
 
@@ -154,6 +165,12 @@ export default function CanvasPage() {
     lsSaveItems(nodes);
   }, [nodes]);
 
+  /* ── persist: edges → localStorage (복원 완료 후에만) ─────────── */
+  useEffect(() => {
+    if (!isRestoredRef.current) return;
+    lsSaveEdges(edges);
+  }, [edges]);
+
   /* ── persist: viewport → localStorage (복원 완료 후에만) ───────── */
   useEffect(() => {
     if (!isRestoredRef.current) return;
@@ -165,6 +182,9 @@ export default function CanvasPage() {
     const view = lsLoadView();
     setScale(view.scale);
     setOffset(view.offset);
+
+    const savedEdges = lsLoadEdges();
+    if (savedEdges.length > 0) setEdges(savedEdges);
 
     const saved = lsLoadItems();
     if (saved.length > 0) {
@@ -262,6 +282,232 @@ export default function CanvasPage() {
     });
   }, [expandedNodeId, historyIndex]);
 
+  /* ── 이미지 드래그 & 드롭 → image 아트보드 노드 생성 ───────────── */
+  const handleImageDrop = useCallback((imageDataUrl: string, worldPos: { x: number; y: number }) => {
+    const num = nodes.filter(n => n.artboardType === 'image').length + 1;
+    const newNode: CanvasNode = {
+      id: generateId(),
+      type: 'image',
+      title: `Image #${num}`,
+      position: {
+        x: worldPos.x - CARD_W / 2,
+        y: worldPos.y - CARD_H / 2,
+      },
+      instanceNumber: num,
+      hasThumbnail: true,
+      artboardType: 'image',
+      thumbnailData: imageDataUrl,
+    };
+    pushHistory([...nodes, newNode]);
+    setSelectedNodeIds([newNode.id]);
+  }, [nodes, pushHistory]);
+
+  /* ── ELEVATION: 현재 뷰 변경 ───────────────────────────────────── */
+  const handleElevationViewChange = useCallback((nodeId: string, view: ElevationView) => {
+    setNodes(prev => prev.map(n => {
+      if (n.id !== nodeId || !n.elevationData) return n;
+      return { ...n, elevationData: { ...n.elevationData, currentView: view } };
+    }));
+  }, []);
+
+  /* ── LINE DRAWING: ELEVATION 결과 → 라인드로잉 변환 ───────────── */
+  const handleLineDrawingTrigger = useCallback(async (sourceNodeId: string) => {
+    const sourceNode = nodes.find(n => n.id === sourceNodeId);
+    if (!sourceNode?.elevationData || sourceNode.elevationData.isLoading) return;
+
+    const { images } = sourceNode.elevationData;
+    const hasImages = Object.values(images).some(v => v.length > 0);
+    if (!hasImages) return;
+
+    console.log('[LINE-DRAWING] ▶ 트리거 시작 — 소스 노드:', sourceNodeId);
+
+    /* Line Drawing 노드 생성 — 로딩 상태 */
+    const ldCount = nodes.filter(n => n.type === 'elevation' && n.title.startsWith('Line Drawing')).length + 1;
+    const ldNodeId = generateId();
+    const ldNode: CanvasNode = {
+      id: ldNodeId,
+      type: 'elevation',
+      title: `Line Drawing #${ldCount}`,
+      position: {
+        x: sourceNode.position.x + CARD_W + 60,
+        y: sourceNode.position.y,
+      },
+      instanceNumber: ldCount,
+      hasThumbnail: false,
+      artboardType: 'image',
+      parentId: sourceNodeId,
+      elevationData: {
+        isLoading: true,
+        currentView: 'front',
+        images: { top: '', front: '', rear: '', left: '', right: '' },
+        aeplSchema: {},
+      },
+    };
+
+    pushHistory([...nodes, ldNode]);
+    setEdges(e => [...e, { id: generateId(), sourceId: sourceNodeId, targetId: ldNodeId }]);
+    setSelectedNodeIds([ldNodeId]);
+    setActiveSidebarNodeType('elevation');
+
+    console.log('[LINE-DRAWING] ◌ LineDrawingNode 생성 완료 — id:', ldNodeId);
+
+    try {
+      console.log('[LINE-DRAWING] → S2S 요청 전송: /api/elevation/linedrawing');
+      const res = await fetch('/api/elevation/linedrawing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images }),
+      });
+
+      console.log('[LINE-DRAWING] ← S2S 응답 수신 — status:', res.status);
+
+      const json = await res.json() as {
+        success: boolean;
+        data?: { images: ElevationNodeData['images'] };
+        error?: string;
+      };
+
+      if (!json.success || !json.data) {
+        throw new Error(json.error ?? 'Unknown error from Line Drawing backend');
+      }
+
+      const ldImages = json.data.images;
+
+      console.log('[LINE-DRAWING] ✓ 라인드로잉 5-view 변환 완료');
+
+      setNodes(prev => prev.map(n => {
+        if (n.id !== ldNodeId) return n;
+        return {
+          ...n,
+          hasThumbnail: true,
+          elevationData: {
+            isLoading: false,
+            currentView: 'front' as ElevationView,
+            images: ldImages,
+            aeplSchema: {},
+          },
+        };
+      }));
+
+      console.log('[LINE-DRAWING] ■ 완료 — LineDrawingNode 업데이트');
+    } catch (err) {
+      console.error('[LINE-DRAWING] ✕ 오류:', err instanceof Error ? err.message : String(err));
+      setNodes(prev => prev.map(n => {
+        if (n.id !== ldNodeId) return n;
+        return {
+          ...n,
+          elevationData: {
+            isLoading: false,
+            currentView: 'front' as ElevationView,
+            images: { top: '', front: '', rear: '', left: '', right: '' },
+            aeplSchema: { error: err instanceof Error ? err.message : String(err) },
+          },
+        };
+      }));
+    }
+  }, [nodes, pushHistory, setEdges]);
+
+  /* ── ELEVATION: S2S 트리거 (이미지 아트보드 선택 후 ELEVATION 클릭) */
+  const handleElevationTrigger = useCallback(async (sourceNode: CanvasNode) => {
+    const imageDataUrl = sourceNode.thumbnailData ?? sourceNode.generatedImageData;
+    if (!imageDataUrl) return;
+
+    /* data URI에서 mimeType + base64 추출 */
+    const match = imageDataUrl.match(/^data:([^;]+);base64,([A-Za-z0-9+/=]+)/);
+    const mimeType   = match?.[1] ?? 'image/jpeg';
+    const imageBase64 = match?.[2] ?? imageDataUrl;
+
+    console.log('[ELEVATION] ▶ 트리거 시작 — 소스 노드:', sourceNode.id, '| mimeType:', mimeType);
+
+    /* ElevationNode 생성 — 로딩 상태 */
+    const elevCount = nodes.filter(n => n.type === 'elevation').length + 1;
+    const elevNodeId = generateId();
+    const elevNode: CanvasNode = {
+      id: elevNodeId,
+      type: 'elevation',
+      title: `Image to Elevation #${elevCount}`,
+      position: {
+        x: sourceNode.position.x + CARD_W + 60,
+        y: sourceNode.position.y,
+      },
+      instanceNumber: elevCount,
+      hasThumbnail: false,
+      artboardType: 'image',
+      parentId: sourceNode.id,
+      elevationData: {
+        isLoading: true,
+        currentView: 'top',
+        images: { top: '', front: '', rear: '', left: '', right: '' },
+        aeplSchema: {},
+      },
+    };
+
+    /* 노드 + 엣지 추가 */
+    pushHistory([...nodes, elevNode]);
+    setEdges(e => [...e, { id: generateId(), sourceId: sourceNode.id, targetId: elevNodeId }]);
+    setSelectedNodeIds([elevNodeId]);
+    setActiveSidebarNodeType('elevation');
+
+    console.log('[ELEVATION] ◌ ElevationNode 생성 완료 — id:', elevNodeId, '| 로딩 시작');
+
+    /* S2S 호출 */
+    try {
+      console.log('[ELEVATION] → S2S 요청 전송: /api/elevation/process');
+      const res = await fetch('/api/elevation/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64, mimeType, prompt: '' }),
+      });
+
+      console.log('[ELEVATION] ← S2S 응답 수신 — status:', res.status);
+
+      const json = await res.json() as {
+        success: boolean;
+        data?: { aeplSchema: Record<string, unknown>; images: ElevationNodeData['images'] };
+        error?: string;
+      };
+
+      if (!json.success || !json.data) {
+        throw new Error(json.error ?? 'Unknown error from ELEVATION backend');
+      }
+
+      const { aeplSchema, images } = json.data;
+
+      console.log('[ELEVATION] ✓ Protocol A — AEPLSchema 수신:', JSON.stringify(aeplSchema).slice(0, 120));
+      console.log('[ELEVATION] ✓ Protocol B — 5-view 이미지 생성 완료');
+
+      setNodes(prev => prev.map(n => {
+        if (n.id !== elevNodeId) return n;
+        return {
+          ...n,
+          hasThumbnail: true,
+          elevationData: {
+            isLoading: false,
+            currentView: 'top' as ElevationView,
+            images,
+            aeplSchema,
+          },
+        };
+      }));
+
+      console.log('[ELEVATION] ■ 완료 — ElevationNode 업데이트');
+    } catch (err) {
+      console.error('[ELEVATION] ✕ 오류:', err instanceof Error ? err.message : String(err));
+      setNodes(prev => prev.map(n => {
+        if (n.id !== elevNodeId) return n;
+        return {
+          ...n,
+          elevationData: {
+            isLoading: false,
+            currentView: 'top' as ElevationView,
+            images: { top: '', front: '', rear: '', left: '', right: '' },
+            aeplSchema: { error: err instanceof Error ? err.message : String(err) },
+          },
+        };
+      }));
+    }
+  }, [nodes, pushHistory, setEdges]);
+
   /* ── expand에서 돌아올 때 썸네일 생성 + 메시지·인사이트 저장 ─── */
   const handleReturnFromExpand = useCallback(() => {
     if (!expandedNodeId) { setExpandedNodeId(null); return; }
@@ -324,8 +570,15 @@ export default function CanvasPage() {
       /* expand 진입 노드 → 즉시 expand */
       if (NODES_THAT_EXPAND.includes(type)) {
         setExpandedNodeId(selectedNode.id);
+        setActiveSidebarNodeType(null);
+        return;
       }
-      /* 인-캔버스 노드 (ELEVATION / VIEWPOINT / DIAGRAM): 추후 구현 */
+
+      /* ELEVATION 인-캔버스 노드 — S2S 트리거 */
+      if (type === 'elevation' && selectedNode.artboardType === 'image') {
+        void handleElevationTrigger(selectedNode);
+        return;
+      }
 
       setActiveSidebarNodeType(null);
       return;
@@ -360,6 +613,9 @@ export default function CanvasPage() {
     /* thumbnail 아트보드: 자동으로 PLANNERS 패널 표시 */
     if (node.artboardType === 'thumbnail') {
       setActiveSidebarNodeType('planners');
+    } else if (node.type === 'elevation') {
+      /* ELEVATION 노드 클릭: AEPL + 갤러리 패널 표시 */
+      setActiveSidebarNodeType('elevation');
     } else {
       setActiveSidebarNodeType(null);
     }
@@ -528,6 +784,8 @@ export default function CanvasPage() {
             onNodeExpand={setExpandedNodeId}
             onNodeDuplicate={duplicateNode}
             onNodeDelete={deleteNode}
+            onImageDrop={handleImageDrop}
+            onLineDrawing={handleLineDrawingTrigger}
           />
 
           <LeftToolbar
@@ -552,6 +810,16 @@ export default function CanvasPage() {
             plannerMessages={
               selectedNodeId
                 ? nodes.find(n => n.id === selectedNodeId)?.plannerMessages
+                : undefined
+            }
+            elevationData={
+              selectedNodeId && activeSidebarNodeType === 'elevation'
+                ? nodes.find(n => n.id === selectedNodeId)?.elevationData
+                : undefined
+            }
+            onElevationViewChange={
+              selectedNodeId
+                ? (view) => handleElevationViewChange(selectedNodeId, view)
                 : undefined
             }
           />

@@ -25,6 +25,8 @@ interface Props {
   onNodeExpand: (id: string) => void;
   onNodeDuplicate: (id: string) => void;
   onNodeDelete: (id: string) => void;
+  onImageDrop?: (imageDataUrl: string, worldPos: { x: number; y: number }) => void;
+  onLineDrawing?: (id: string) => void;
 }
 
 const GRID_SIZE   = 40;
@@ -47,7 +49,7 @@ export default function InfiniteCanvas({
   onScaleChange, onOffsetChange,
   onNodePositionChange, onNodePositionCommit,
   onNodeSelect, onNodeDeselect, onNodesSelect, onNodeExpand,
-  onNodeDuplicate, onNodeDelete,
+  onNodeDuplicate, onNodeDelete, onImageDrop, onLineDrawing,
 }: Props) {
   /* ── 포트 계산 ──────────────────────────────────────────────────── */
   const inCount  = (id: string) => edges.filter(e => e.targetId === id).length;
@@ -78,6 +80,38 @@ export default function InfiniteCanvas({
   const [isDraggingPan, setIsDraggingPan] = useState(false);
   const panStart       = useRef({ x: 0, y: 0 });
   const offsetSnapshot = useRef({ x: 0, y: 0 });
+
+  /* ── 이미지 드래그 & 드롭 ───────────────────────────────────────── */
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'));
+    if (!file || !onImageDrop) return;
+    const canvasRect = wrapperRef.current?.getBoundingClientRect();
+    if (!canvasRect) return;
+    const worldPos = toWorld(
+      e.clientX - canvasRect.left,
+      e.clientY - canvasRect.top,
+      { offset: offsetRef.current, scale: scaleRef.current },
+    );
+    const reader = new FileReader();
+    reader.onload = () => onImageDrop(reader.result as string, worldPos);
+    reader.readAsDataURL(file);
+  }, [onImageDrop]);
 
   /* ── 미들 버튼 팬 상태 ──────────────────────────────────────────── */
   const isMiddleButtonPanningRef = useRef(false);
@@ -359,6 +393,9 @@ export default function InfiniteCanvas({
       onPointerCancel={handleWrapperPointerDown}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       style={{
         position: 'absolute',
         inset: 0,
@@ -420,10 +457,30 @@ export default function InfiniteCanvas({
               portLeft={getPortLeft(node.id)}
               portRight={getPortRight(node.id)}
               plannerMessages={node.plannerMessages}
+              elevationData={node.elevationData}
+              onLineDrawing={onLineDrawing}
             />
           </div>
         ))}
       </div>
+
+      {/* ── 이미지 드롭 오버레이 ────────────────────────────────────── */}
+      {isDragOver && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 200, pointerEvents: 'none',
+          border: '2px dashed var(--color-black)',
+          background: 'rgba(0,0,0,0.04)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <span style={{
+            fontFamily: 'var(--font-family-bebas)',
+            fontSize: '1.25rem', letterSpacing: '0.1em',
+            color: 'var(--color-black)', opacity: 0.4,
+          }}>
+            DROP IMAGE
+          </span>
+        </div>
+      )}
 
       {/* ── rubber band 선택 rect overlay ───────────────────────────── */}
       {dragSelectRect && (() => {
