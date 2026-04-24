@@ -1,0 +1,421 @@
+'use client';
+
+import { useRef } from 'react';
+import { CanvasNode, NODE_DEFINITIONS, PortShape, ArtboardType, ARTBOARD_LABEL, NODE_TO_ARTBOARD_TYPE, PlannerMessage } from '@/types/canvas';
+
+interface Props {
+  node: CanvasNode;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
+  onExpand: (id: string) => void;
+  onDuplicate: (id: string) => void;
+  onDelete: (id: string) => void;
+  onMouseDown: (id: string, e: React.PointerEvent) => void;
+  hasThumbnail: boolean;
+  artboardType: ArtboardType;
+  portLeft?: PortShape;
+  portRight?: PortShape;
+  plannerMessages?: PlannerMessage[];
+}
+
+/* shortFinalOutput 문자열 → bullet 배열 파싱 */
+function parseShortFinal(text: string): string[] {
+  const items = text.split(/(?=\[)/).map(s => s.trim()).filter(Boolean);
+  return items.slice(0, 4);
+}
+
+/* PLANNERS 썸네일 컴포넌트 */
+function PlannersThumbnail({ messages }: { messages: PlannerMessage[] }) {
+  const lastAi = [...messages].reverse().find(m => m.type === 'ai');
+  const lastUser = [...messages].reverse().find(m => m.type === 'user');
+  const data = lastAi?.type === 'ai' ? lastAi.data as Record<string, unknown> : null;
+  const shortFinal = data?.shortFinalOutput as string | undefined;
+  const bullets = shortFinal ? parseShortFinal(shortFinal) : [];
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      display: 'flex', flexDirection: 'column',
+      background: 'var(--color-white)',
+      overflow: 'hidden',
+    }}>
+      {/* 헤더 — PLANNERS 로고 */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 5,
+        padding: '7px 10px 6px',
+        borderBottom: '1px solid var(--color-gray-100)',
+        flexShrink: 0,
+      }}>
+        <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-gray-500)', flexShrink: 0 }}>
+          <rect x="2" y="3" width="12" height="10" rx="2" />
+          <path d="M5 3V2M11 3V2M5 8h6M5 11h4" />
+        </svg>
+        <span style={{ fontSize: '0.55rem', fontWeight: 900, letterSpacing: '0.1em', color: 'var(--color-gray-500)', textTransform: 'uppercase' }}>
+          Planners
+        </span>
+      </div>
+
+      {/* 바디 */}
+      <div style={{ flex: 1, padding: '7px 10px', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 5 }}>
+        {/* 마지막 질문 */}
+        {lastUser?.type === 'user' && (
+          <p style={{ fontSize: '0.5rem', color: 'var(--color-gray-400)', margin: 0, lineHeight: 1.4,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            Q. {lastUser.text}
+          </p>
+        )}
+        {/* shortFinal 버렛 */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {bullets.map((b, i) => {
+            const bracket = b.match(/^\[([^\]]+)\]/);
+            const label = bracket?.[1] ?? '';
+            const rest  = bracket ? b.slice(bracket[0].length).trim() : b;
+            return (
+              <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '0.45rem', fontWeight: 900, color: 'var(--color-black)',
+                  background: 'var(--color-gray-100)', borderRadius: 2, padding: '1px 3px',
+                  lineHeight: 1.4, flexShrink: 0, maxWidth: 60, whiteSpace: 'nowrap',
+                  overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {label}
+                </span>
+                <span style={{ fontSize: '0.45rem', color: 'var(--color-gray-500)', lineHeight: 1.5,
+                  overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical' as const }}>
+                  {rest}
+                </span>
+              </div>
+            );
+          })}
+          {bullets.length === 0 && (
+            <span style={{ fontSize: '0.5rem', color: 'var(--color-gray-300)' }}>분석 완료</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const IC = { stroke: 'currentColor', fill: 'none', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+
+const IconDuplicate = () => (
+  <svg viewBox="0 0 20 20" {...IC}>
+    <rect x="7" y="7" width="10" height="10" rx="2" />
+    <path d="M5 13H4A2 2 0 0 1 2 11V4A2 2 0 0 1 4 2H11A2 2 0 0 1 13 4V5" />
+  </svg>
+);
+
+const IconDownload = () => (
+  <svg viewBox="0 0 20 20" {...IC}>
+    <path d="M10 3V13M6 9L10 13L14 9" />
+    <path d="M3 16V17A2 2 0 0 0 5 19H15A2 2 0 0 0 17 17V16" />
+  </svg>
+);
+
+const IconDelete = () => (
+  <svg viewBox="0 0 20 20" {...IC}>
+    <path d="M5 5L5 16A2 2 0 0 0 7 18H13A2 2 0 0 0 15 16V5" />
+    <path d="M3 5H17M8 2H12" />
+    <line x1="8" y1="9" x2="8" y2="13" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+  </svg>
+);
+
+const IconExpand = () => (
+  <svg viewBox="0 0 20 20" {...IC}>
+    <polyline points="12,3 17,3 17,8" />
+    <polyline points="3,12 3,17 8,17" />
+    <line x1="17" y1="3" x2="11" y2="9" />
+    <line x1="3" y1="17" x2="9" y2="11" />
+  </svg>
+);
+
+const CARD_W_REM = '17.5rem';
+const CARD_H_REM = '12.375rem';
+const PORT_SIZE  = 8;
+
+function PortIndicator({ shape, side }: { shape: PortShape; side: 'left' | 'right' }) {
+  if (shape === 'none') return null;
+  const isSolid   = shape.endsWith('-solid');
+  const isDiamond = shape.startsWith('diamond');
+  const base: React.CSSProperties = {
+    position: 'absolute',
+    [side]: -(PORT_SIZE / 2),
+    top: '50%',
+    width: PORT_SIZE,
+    height: PORT_SIZE,
+    zIndex: 5,
+    pointerEvents: 'none',
+    background: isSolid ? 'var(--color-black)' : 'var(--color-white)',
+    border:     isSolid ? 'none' : '1.5px solid var(--color-black)',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+  };
+  if (isDiamond) return <div style={{ ...base, transform: 'translateY(-50%) rotate(45deg)' }} />;
+  return <div style={{ ...base, borderRadius: '50%', transform: 'translateY(-50%)' }} />;
+}
+
+export default function NodeCard({
+  node, isSelected, onSelect, onExpand, onDuplicate, onDelete, onMouseDown, hasThumbnail,
+  artboardType, plannerMessages,
+  portLeft = 'none', portRight = 'none',
+}: Props) {
+  const { id, type } = node;
+  const def = NODE_DEFINITIONS[type];
+
+  const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
+  const lastTapTimeRef = useRef<number>(0);
+
+  const handleArtboardPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('button')) return;
+    mouseDownPos.current = { x: e.clientX, y: e.clientY };
+    onMouseDown(id, e);
+  };
+
+  const handleArtboardPointerUp = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    if (!mouseDownPos.current) return;
+    const dx = Math.abs(e.clientX - mouseDownPos.current.x);
+    const dy = Math.abs(e.clientY - mouseDownPos.current.y);
+    mouseDownPos.current = null;
+    if (dx < 6 && dy < 6) {
+      const now = Date.now();
+      if (now - lastTapTimeRef.current < 300 && !isBlank) {
+        lastTapTimeRef.current = 0;
+        onExpand(id);
+      } else {
+        lastTapTimeRef.current = now;
+        onSelect(id);
+      }
+    }
+  };
+
+  const actionBtnBase: React.CSSProperties = {
+    width: 36,
+    height: 36,
+    border: 'none',
+    borderRadius: 'var(--radius-pill)',
+    background: 'var(--color-white)',
+    boxShadow: 'var(--shadow-float)',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'var(--color-gray-500)',
+    transition: 'background-color 100ms ease, color 100ms ease',
+    flexShrink: 0,
+  };
+
+  const isBlank = artboardType === 'blank';
+
+  const artboardBorder = 'none';
+  const artboardBoxShadow = isSelected ? '0 0 0 2px var(--color-black), var(--shadow-float)' : 'var(--shadow-float)';
+
+  return (
+    <div style={{ width: CARD_W_REM, userSelect: 'none', position: 'relative' }}>
+
+      {/* ── 액션 바 — 선택 시 노출 ────────────────────────────────── */}
+      {isSelected && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 'calc(100% + 0.5rem)',
+            right: 0,
+            display: 'flex',
+            gap: '0.25rem',
+            zIndex: 20,
+            pointerEvents: 'all',
+          }}
+        >
+          <button
+            title="복제"
+            style={actionBtnBase}
+            onClick={e => { e.stopPropagation(); onDuplicate(id); }}
+            onPointerEnter={e => { if (e.pointerType !== 'mouse') return; e.currentTarget.style.backgroundColor = 'var(--color-gray-100)'; e.currentTarget.style.color = 'var(--color-black)'; }}
+            onPointerLeave={e => { if (e.pointerType !== 'mouse') return; e.currentTarget.style.backgroundColor = 'var(--color-white)'; e.currentTarget.style.color = 'var(--color-gray-500)'; }}
+          >
+            <span style={{ width: 16, height: 16, display: 'flex' }}><IconDuplicate /></span>
+          </button>
+
+          <button
+            title="다운로드"
+            style={actionBtnBase}
+            onClick={e => e.stopPropagation()}
+            onPointerEnter={e => { if (e.pointerType !== 'mouse') return; e.currentTarget.style.backgroundColor = 'var(--color-gray-100)'; e.currentTarget.style.color = 'var(--color-black)'; }}
+            onPointerLeave={e => { if (e.pointerType !== 'mouse') return; e.currentTarget.style.backgroundColor = 'var(--color-white)'; e.currentTarget.style.color = 'var(--color-gray-500)'; }}
+          >
+            <span style={{ width: 16, height: 16, display: 'flex' }}><IconDownload /></span>
+          </button>
+
+          <button
+            title="삭제"
+            style={actionBtnBase}
+            onClick={e => { e.stopPropagation(); onDelete(id); }}
+            onPointerEnter={e => { if (e.pointerType !== 'mouse') return; e.currentTarget.style.backgroundColor = '#fff0f0'; e.currentTarget.style.color = '#cc0000'; }}
+            onPointerLeave={e => { if (e.pointerType !== 'mouse') return; e.currentTarget.style.backgroundColor = 'var(--color-white)'; e.currentTarget.style.color = 'var(--color-gray-500)'; }}
+          >
+            <span style={{ width: 16, height: 16, display: 'flex' }}><IconDelete /></span>
+          </button>
+        </div>
+      )}
+
+      {/* ── 아트보드 ─────────────────────────────────────────────── */}
+      <div
+        onPointerDown={handleArtboardPointerDown}
+        onPointerUp={handleArtboardPointerUp}
+        style={{
+          width: CARD_W_REM,
+          height: CARD_H_REM,
+          background: 'var(--color-white)',
+          borderRadius: 'var(--radius-box)',
+          border: artboardBorder,
+          boxShadow: artboardBoxShadow,
+          position: 'relative',
+          overflow: 'hidden',
+          cursor: 'default',
+          transition: 'box-shadow 150ms ease',
+        }}
+      >
+        {/* ── 확대 버튼: 선택 + blank 제외 모든 아트보드에 표시 ────── */}
+        {isSelected && artboardType !== 'blank' && (
+          <button
+            title="전체 화면으로 열기"
+            onClick={e => { e.stopPropagation(); onExpand(id); }}
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              zIndex: 10,
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              border: '1.5px solid var(--color-gray-200)',
+              background: 'var(--color-white)',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--color-gray-500)',
+              transition: 'border-color 100ms ease, color 100ms ease, box-shadow 100ms ease',
+            }}
+            onPointerEnter={e => {
+              if (e.pointerType !== 'mouse') return;
+              e.currentTarget.style.borderColor = 'var(--color-black)';
+              e.currentTarget.style.color = 'var(--color-black)';
+              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.18)';
+            }}
+            onPointerLeave={e => {
+              if (e.pointerType !== 'mouse') return;
+              e.currentTarget.style.borderColor = 'var(--color-gray-200)';
+              e.currentTarget.style.color = 'var(--color-gray-500)';
+              e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.12)';
+            }}
+          >
+            <span style={{ width: 14, height: 14, display: 'flex' }}><IconExpand /></span>
+          </button>
+        )}
+
+        {/* ── 아트보드 내용 ──────────────────────────────────────── */}
+        {isBlank ? (
+          /* blank: 빈 플레이스홀더 */
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+        ) : (artboardType === 'thumbnail' && plannerMessages && plannerMessages.length > 0) ? (
+          /* Planners 썸네일 */
+          <PlannersThumbnail messages={plannerMessages} />
+        ) : (artboardType === 'image' && node.thumbnailData) ? (
+          /* image 아트보드 + 데이터 있음 */
+          <img
+            src={node.thumbnailData}
+            alt={def.displayLabel}
+            style={{
+              position: 'absolute', inset: 0,
+              width: '100%', height: '100%',
+              objectFit: 'contain', pointerEvents: 'none',
+            }}
+          />
+        ) : hasThumbnail ? (
+          /* 기타 아트보드 썸네일 */
+          node.thumbnailData ? (
+            <img
+              src={`data:image/png;base64,${node.thumbnailData}`}
+              alt={def.displayLabel}
+              style={{
+                position: 'absolute', inset: 0,
+                width: '100%', height: '100%',
+                objectFit: 'contain', pointerEvents: 'none',
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                position: 'absolute', inset: 0,
+                background: 'linear-gradient(135deg, var(--color-gray-100), var(--color-gray-200))',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              <span className="text-title" style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', letterSpacing: '0.08em' }}>
+                {def.displayLabel}
+              </span>
+            </div>
+          )
+        ) : (
+          /* 썸네일 없음 — 플레이스홀더 */
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              pointerEvents: 'none',
+            }}
+          >
+            <span
+              className="text-title"
+              style={{ fontSize: '0.75rem', color: 'var(--color-gray-300)', letterSpacing: '0.08em' }}
+            >
+              {def.displayLabel}
+            </span>
+            <span style={{ display: 'block', width: 28, height: 1, background: 'var(--color-gray-200)' }} />
+            <span className="text-caption" style={{ color: 'var(--color-gray-300)' }}>
+              썸네일 없음
+            </span>
+          </div>
+        )}
+
+        {/* ── 아트보드 유형 배지 (blank 제외) ────────────────────── */}
+        {!isBlank && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 8,
+              left: 10,
+              pointerEvents: 'none',
+              zIndex: 6,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: 'var(--font-family-bebas)',
+                fontSize: '0.625rem',
+                color: 'var(--color-gray-300)',
+                letterSpacing: '0.08em',
+              }}
+            >
+              {artboardType === NODE_TO_ARTBOARD_TYPE[node.type]
+                ? (def.displayLabel || ARTBOARD_LABEL[artboardType])
+                : ARTBOARD_LABEL[artboardType]}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* ── 포트 인디케이터 ──────────────────────────────────────── */}
+      <PortIndicator shape={portLeft}  side="left"  />
+      <PortIndicator shape={portRight} side="right" />
+    </div>
+  );
+}
