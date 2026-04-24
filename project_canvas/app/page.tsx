@@ -338,6 +338,7 @@ export default function CanvasPage() {
       parentId: sourceNodeId,
       elevationData: {
         isLoading: true,
+        isLineDrawing: true,
         currentView: 'front',
         images: { top: '', front: '', rear: '', left: '', right: '' },
         aeplSchema: {},
@@ -382,6 +383,7 @@ export default function CanvasPage() {
           hasThumbnail: true,
           elevationData: {
             isLoading: false,
+            isLineDrawing: true,
             currentView: 'front' as ElevationView,
             images: ldImages,
             aeplSchema: {},
@@ -398,6 +400,7 @@ export default function CanvasPage() {
           ...n,
           elevationData: {
             isLoading: false,
+            isLineDrawing: true,
             currentView: 'front' as ElevationView,
             images: { top: '', front: '', rear: '', left: '', right: '' },
             aeplSchema: { error: err instanceof Error ? err.message : String(err) },
@@ -822,7 +825,7 @@ export default function CanvasPage() {
                 : undefined
             }
             onLineDrawing={
-              selectedNodeId
+              selectedNodeId && !nodes.find(n => n.id === selectedNodeId)?.elevationData?.isLineDrawing
                 ? () => handleLineDrawingTrigger(selectedNodeId)
                 : undefined
             }

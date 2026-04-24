@@ -93,6 +93,7 @@ export type ElevationView = 'top' | 'front' | 'rear' | 'left' | 'right';
 
 export interface ElevationNodeData {
   isLoading: boolean;
+  isLineDrawing?: boolean; // true = 라인드로잉 결과 노드 → LINE DRAWING 버튼 숨김
   currentView: ElevationView;
   images: {
     top: string;
