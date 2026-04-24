@@ -785,7 +785,6 @@ export default function CanvasPage() {
             onNodeDuplicate={duplicateNode}
             onNodeDelete={deleteNode}
             onImageDrop={handleImageDrop}
-            onLineDrawing={handleLineDrawingTrigger}
           />
 
           <LeftToolbar
@@ -820,6 +819,11 @@ export default function CanvasPage() {
             onElevationViewChange={
               selectedNodeId
                 ? (view) => handleElevationViewChange(selectedNodeId, view)
+                : undefined
+            }
+            onLineDrawing={
+              selectedNodeId
+                ? () => handleLineDrawingTrigger(selectedNodeId)
                 : undefined
             }
           />

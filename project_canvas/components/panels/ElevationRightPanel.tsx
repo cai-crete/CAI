@@ -5,6 +5,7 @@ import { ElevationNodeData, ElevationView } from '@/types/canvas';
 interface Props {
   elevationData: ElevationNodeData;
   onViewChange: (view: ElevationView) => void;
+  onLineDrawing?: () => void;
 }
 
 /* AEPL 수치 필드 표시 설정 */
@@ -67,7 +68,7 @@ function LoadingSkeleton() {
   );
 }
 
-export default function ElevationRightPanel({ elevationData, onViewChange }: Props) {
+export default function ElevationRightPanel({ elevationData, onViewChange, onLineDrawing }: Props) {
   const { isLoading, currentView, images, aeplSchema } = elevationData;
 
   if (isLoading) return <LoadingSkeleton />;
@@ -192,6 +193,28 @@ export default function ElevationRightPanel({ elevationData, onViewChange }: Pro
           ))}
         </div>
       </div>
+
+      {/* ── LINE DRAWING GENERATE 버튼 ─────────────────────────── */}
+      {onLineDrawing && (
+        <>
+          <div style={{ height: 1, background: 'var(--color-gray-100)', flexShrink: 0 }} />
+          <button
+            onClick={onLineDrawing}
+            style={{
+              width: '100%', height: 'var(--h-cta-lg, 2.5rem)',
+              border: 'none', borderRadius: 'var(--radius-pill)',
+              background: 'var(--color-black)', color: 'var(--color-white)',
+              fontFamily: 'var(--font-family-bebas)', fontSize: '1rem',
+              letterSpacing: '0.08em', cursor: 'pointer',
+              transition: 'opacity 120ms ease', flexShrink: 0,
+            }}
+            onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
+            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+          >
+            LINE DRAWING
+          </button>
+        </>
+      )}
     </div>
   );
 }

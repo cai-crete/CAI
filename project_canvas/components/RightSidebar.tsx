@@ -12,6 +12,7 @@ interface Props {
   plannerMessages?: PlannerMessage[];
   elevationData?: ElevationNodeData;
   onElevationViewChange?: (view: ElevationView) => void;
+  onLineDrawing?: () => void;
 }
 
 const IC = { stroke: 'currentColor', fill: 'none', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
@@ -209,7 +210,7 @@ const ARTBOARD_TOOLS_LABEL: Record<'sketch' | 'image', string> = {
 export default function RightSidebar({
   activeSidebarNodeType, selectedArtboardType,
   onNodeTabSelect, onNavigateToExpand,
-  plannerMessages, elevationData, onElevationViewChange,
+  plannerMessages, elevationData, onElevationViewChange, onLineDrawing,
 }: Props) {
   const [accordionOpen, setAccordionOpen] = useState(true);
 
@@ -287,24 +288,26 @@ export default function RightSidebar({
   if (isPanelMode) {
     return (
       <div style={{ ...area, overflowY: 'hidden' }}>
-        {/* 헤더 행: [→ pill] + [노드탭 pill] */}
+        {/* 헤더 행: [→ pill (elevation 제외)] + [노드탭 pill] */}
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'stretch', flexShrink: 0 }}>
-          <div style={{ ...pill(), width: 'var(--h-cta-lg)', height: 'var(--h-cta-lg)' }}>
-            <button
-              onClick={() => onNavigateToExpand(activeSidebarNodeType!)}
-              title="expand로 이동"
-              style={{
-                width: '100%', height: '100%', display: 'flex', alignItems: 'center',
-                justifyContent: 'center', border: 'none', background: 'transparent',
-                cursor: 'pointer', borderRadius: 'var(--radius-pill)',
-                color: 'var(--color-gray-500)', transition: 'background-color 100ms ease, color 100ms ease',
-              }}
-              onMouseEnter={e => { hoverOn(e); e.currentTarget.style.color = 'var(--color-black)'; }}
-              onMouseLeave={e => { hoverOff(e); e.currentTarget.style.color = 'var(--color-gray-500)'; }}
-            >
-              <span style={{ width: 20, height: 20, display: 'flex' }}><IconNavigate /></span>
-            </button>
-          </div>
+          {activeSidebarNodeType !== 'elevation' && (
+            <div style={{ ...pill(), width: 'var(--h-cta-lg)', height: 'var(--h-cta-lg)' }}>
+              <button
+                onClick={() => onNavigateToExpand(activeSidebarNodeType!)}
+                title="expand로 이동"
+                style={{
+                  width: '100%', height: '100%', display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', border: 'none', background: 'transparent',
+                  cursor: 'pointer', borderRadius: 'var(--radius-pill)',
+                  color: 'var(--color-gray-500)', transition: 'background-color 100ms ease, color 100ms ease',
+                }}
+                onMouseEnter={e => { hoverOn(e); e.currentTarget.style.color = 'var(--color-black)'; }}
+                onMouseLeave={e => { hoverOff(e); e.currentTarget.style.color = 'var(--color-gray-500)'; }}
+              >
+                <span style={{ width: 20, height: 20, display: 'flex' }}><IconNavigate /></span>
+              </button>
+            </div>
+          )}
 
           <div style={{ ...pill(), flex: 1 }}>
             <button
@@ -338,6 +341,7 @@ export default function RightSidebar({
             <ElevationRightPanel
               elevationData={elevationData}
               onViewChange={view => onElevationViewChange?.(view)}
+              onLineDrawing={elevationData.isLoading ? undefined : onLineDrawing}
             />
           ) : (
             <NodePanel

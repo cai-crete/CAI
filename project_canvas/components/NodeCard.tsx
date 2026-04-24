@@ -17,7 +17,6 @@ interface Props {
   portRight?: PortShape;
   plannerMessages?: PlannerMessage[];
   elevationData?: ElevationNodeData;
-  onLineDrawing?: (id: string) => void;
 }
 
 /* shortFinalOutput 문자열 → bullet 배열 파싱 */
@@ -157,7 +156,7 @@ function PortIndicator({ shape, side }: { shape: PortShape; side: 'left' | 'righ
 
 export default function NodeCard({
   node, isSelected, onSelect, onExpand, onDuplicate, onDelete, onMouseDown, hasThumbnail,
-  artboardType, plannerMessages, elevationData, onLineDrawing,
+  artboardType, plannerMessages, elevationData,
   portLeft = 'none', portRight = 'none',
 }: Props) {
   const { id, type } = node;
@@ -365,32 +364,6 @@ export default function NodeCard({
                 </div>
               )}
 
-              {/* ── LINE DRAWING GENERATE 버튼 ────────────────── */}
-              {onLineDrawing && elevationData.images[elevationData.currentView] && (
-                <button
-                  title="라인드로잉으로 변환"
-                  onClick={e => { e.stopPropagation(); onLineDrawing(id); }}
-                  style={{
-                    position: 'absolute', bottom: 28, left: '50%',
-                    transform: 'translateX(-50%)',
-                    height: 22, padding: '0 10px',
-                    border: '1px solid rgba(255,255,255,0.9)',
-                    borderRadius: 'var(--radius-pill)',
-                    background: 'rgba(0,0,0,0.72)',
-                    color: 'var(--color-white)',
-                    fontFamily: 'var(--font-family-bebas)',
-                    fontSize: '0.55rem', letterSpacing: '0.08em',
-                    cursor: 'pointer', whiteSpace: 'nowrap',
-                    display: 'flex', alignItems: 'center', gap: 4,
-                    transition: 'background-color 100ms ease, opacity 100ms ease',
-                    zIndex: 8, pointerEvents: 'all',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.9)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.72)')}
-                >
-                  LINE DRAWING
-                </button>
-              )}
             </>
           )
         ) : (artboardType === 'thumbnail' && plannerMessages && plannerMessages.length > 0) ? (

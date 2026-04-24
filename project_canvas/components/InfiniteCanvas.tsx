@@ -26,7 +26,6 @@ interface Props {
   onNodeDuplicate: (id: string) => void;
   onNodeDelete: (id: string) => void;
   onImageDrop?: (imageDataUrl: string, worldPos: { x: number; y: number }) => void;
-  onLineDrawing?: (id: string) => void;
 }
 
 const GRID_SIZE   = 40;
@@ -49,7 +48,7 @@ export default function InfiniteCanvas({
   onScaleChange, onOffsetChange,
   onNodePositionChange, onNodePositionCommit,
   onNodeSelect, onNodeDeselect, onNodesSelect, onNodeExpand,
-  onNodeDuplicate, onNodeDelete, onImageDrop, onLineDrawing,
+  onNodeDuplicate, onNodeDelete, onImageDrop,
 }: Props) {
   /* ── 포트 계산 ──────────────────────────────────────────────────── */
   const inCount  = (id: string) => edges.filter(e => e.targetId === id).length;
@@ -458,7 +457,6 @@ export default function InfiniteCanvas({
               portRight={getPortRight(node.id)}
               plannerMessages={node.plannerMessages}
               elevationData={node.elevationData}
-              onLineDrawing={onLineDrawing}
             />
           </div>
         ))}
